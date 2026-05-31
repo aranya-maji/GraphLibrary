@@ -1,0 +1,791 @@
+﻿
+@{
+    Layout = null;
+}
+
+
+<style>
+
+    html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    }
+
+    #viewport-canvas {
+        width: 100%;
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        cursor: grab;
+    }
+
+    #graph-canvas {
+        position: absolute;
+        transform: translate(0px, 0px);
+        transform-origin: 0 0;
+    }
+
+</style>
+
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta name="viewport" content="width=device-width" />
+    <title>Index</title>
+    @Scripts.Render("~/bundles/jquery")
+</head>
+<body>
+    <div id="viewport-canvas">
+        <div id="graph-canvas">
+        
+        </div>
+    </div>
+</body>
+</html>
+
+<script>
+
+    const graphLibrary = () => {
+
+
+        let nodeDirection = 1;
+
+
+        let isPanning = false;
+        let startX = 0;
+        let startY = 0;
+        let panX = $("#viewport-canvas").width() / 2;;
+        let panY = $("#viewport-canvas").height() / 2;;
+        let scale = 1;
+
+        const updateTransform = () => {
+            $("#graph-canvas").css(
+                "transform",
+                `translate(${panX}px, ${panY}px) scale(${scale})`
+            );
+        };
+
+        updateTransform();
+
+        $("#graph-canvas").on("mousedown", function (e) {
+
+            if ($(e.target).closest(".node").length)
+                return;
+
+            isPanning = true;
+            startX = e.clientX;
+            startY = e.clientY;
+
+        });
+
+        $(document).on("mousemove", function (e) {
+
+            if (!isPanning)
+                return;
+
+            panX += e.clientX - startX;
+            panY += e.clientY - startY;
+
+            startX = e.clientX;
+            startY = e.clientY;
+
+            updateTransform();
+        });
+
+        $(document).on("mouseup", function () {
+
+            isPanning = false;
+
+        });
+
+        $("#viewport-canvas").on("wheel", function (e) {
+
+            e.preventDefault();
+
+            scale *= e.originalEvent.deltaY < 0 ? 1.1 : 0.9;
+
+            scale = Math.max(0.2, Math.min(scale, 5));
+
+            updateTransform();
+        });
+
+
+        let data = [];
+        let marginTopBottom = 20;
+        let marginLeftRight = 20;
+        let padding = 10;
+        let radius = 5;
+        let minWidth = 50;
+        let minHeight = 25;
+        let fontSize = 16;
+        let borderWidth = 2;
+        let backgroundColor = "grey";
+        const idMappingDictionary = new Map();
+        const divMappingDictionary = new Map();
+
+        const initGraph = (input) => {
+
+            sendGraphData(input);
+            orderData();
+            if (mapID()) {
+
+                initRecursion();
+                displayGraph();
+                shifting();
+                clearCanvas();
+                displayFinal();
+
+            }
+
+        };
+
+        const sendGraphData = (input) => {
+
+            data = input;
+
+        };
+
+        const mapID = () => {
+
+            data.forEach(function (item) {
+
+                if (item.ref == null && !idMappingDictionary.has(item.id)) {
+
+                    idMappingDictionary.set(null, [item]);
+
+                }
+                else {
+                    
+                    if (idMappingDictionary.has(item.ref)) {
+
+                        let existing = idMappingDictionary.get(item.ref);
+                        existing.push(item);
+                        idMappingDictionary.set(item.ref, existing);
+
+                    }
+                    else {
+
+                        idMappingDictionary.set(item.ref, [item]);
+
+                    }
+
+                }
+
+            });
+
+            if (data.filter(x => x.ref == null).length == 0) {
+
+                window.alert("There is no start point");
+
+                return false;
+
+            }
+
+            return true;
+
+        };
+
+        const orderData = () => {
+
+            data.sort((a, b) => a.sequence - b.sequence);
+
+        };
+
+        const clearCanvas = () => {
+
+            $("#graph-canvas").empty();
+
+        }
+
+        const initRecursion = () => {
+
+            let startPoint = idMappingDictionary.get(null);
+            recurseTree(null, startPoint);
+
+        };
+
+        const shifting = () => {
+            let startPoint = idMappingDictionary.get(null);
+            shiftingTree(null, startPoint);
+        };
+
+        const createBox = (id, name) => {
+
+            return $("<div>")
+                .attr("id", id)
+                .addClass("node")
+                .text(name)
+                .css({
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    position: "absolute",
+                    top: "0px",
+                    left: "0px",
+                    minWidth: minWidth + "px",
+                    minHeight: minHeight + "px",
+                    marginTop: marginTopBottom + "px",
+                    marginBottom: marginTopBottom + "px",
+                    marginLeft: marginLeftRight + "px",
+                    marginRight: marginLeftRight + "px",
+                    padding: padding + "px",
+                    borderRadius: radius + "px",
+                    border: borderWidth + "px solid black",
+                    fontSize: fontSize + "px",
+                    backgroundColor: backgroundColor,
+                    userSelect: "none"
+                });
+
+        };
+
+        const createBoxGroup = (startID) => {
+
+            if (startID != null) {
+
+                switch (nodeDirection) {
+
+                    case 2:
+
+                        createBoxGroupNodeDirectionRight(startID);
+                        break;
+
+                    case 4:
+
+                        createBoxGroupNodeDirectionBottom(startID);
+                        break;
+
+                    case 8:
+
+                        createBoxGroupNodeDirectionLeft(startID);
+                        break;
+
+                    default:
+
+                        createBoxGroupNodeDirectionTop(startID);
+                        break;
+
+                }
+
+            }
+
+        }
+
+        const createBoxGroupNodeDirectionTop = (startID) => {
+
+            let totalWidth = 0;
+            let totalHeight = 0;
+
+            let childrenNodeIDs = data.filter(x => x.ref == startID).map(function (item) {
+                return item.id;
+            });
+
+            childrenNodeIDs.forEach(function (item) {
+                let div = divMappingDictionary.get(item);
+                totalWidth += div.outerWidth(true);
+                totalHeight = div.outerHeight(true);
+            });
+
+            let childrenNodeTotalWidthTemp = totalWidth;
+            let parentDiv = divMappingDictionary.get(startID);
+            totalHeight += parentDiv.outerHeight(true);
+            totalWidth = Math.max(totalWidth, parentDiv.outerWidth(true));
+
+            const nodeGroup = $("<div>")
+                .attr("id", "nodegroup" + startID)
+                .addClass("nodegroup")
+                .css({
+                    position: "absolute",
+                    width: totalWidth + "px",
+                    height: totalHeight + "px",
+                    margin: "0",
+                    padding: "0"
+                });
+
+            if (totalWidth == parentDiv.outerWidth(true)) {
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", "0px");
+
+                let extraWidthOneSide = (totalWidth - childrenNodeTotalWidthTemp) / 2;
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("left", extraWidthOneSide + "px");
+                    div.css("top", parentDiv.outerHeight(true) + "px");
+                    extraWidthOneSide += div.outerWidth(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+            else {
+
+                let extraWidthOneSide = (totalWidth - parentDiv.outerWidth(true)) / 2;
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", extraWidthOneSide + "px");
+
+                let oneSideChildGap = 0;
+
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("left", oneSideChildGap + "px");
+                    div.css("top", parentDiv.outerHeight(true) + "px");
+                    oneSideChildGap += div.outerWidth(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+
+        };
+
+        const createBoxGroupNodeDirectionBottom = (startID) => {
+
+            let totalWidth = 0;
+            let totalHeight = 0;
+
+            let childrenNodeIDs = data.filter(x => x.ref == startID).map(function (item) {
+                return item.id;
+            });
+
+            childrenNodeIDs.forEach(function (item) {
+                let div = divMappingDictionary.get(item);
+                totalWidth += div.outerWidth(true);
+                totalHeight = div.outerHeight(true);
+            });
+
+            let childrenNodeTotalWidthTemp = totalWidth;
+            let parentDiv = divMappingDictionary.get(startID);
+            totalHeight += parentDiv.outerHeight(true);
+            totalWidth = Math.max(totalWidth, parentDiv.outerWidth(true));
+
+            const nodeGroup = $("<div>")
+                .attr("id", "nodegroup" + startID)
+                .addClass("nodegroup")
+                .css({
+                    position: "absolute",
+                    width: totalWidth + "px",
+                    height: totalHeight + "px",
+                    margin: "0",
+                    padding: "0"
+                });
+
+            if (totalWidth == parentDiv.outerWidth(true)) {
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", "0px");
+
+                let extraWidthOneSide = (totalWidth - childrenNodeTotalWidthTemp) / 2;
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("left", extraWidthOneSide + "px");
+                    div.css("top", "-" + parentDiv.outerHeight(true) + "px");
+                    extraWidthOneSide += div.outerWidth(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+            else {
+
+                let extraWidthOneSide = (totalWidth - parentDiv.outerWidth(true)) / 2;
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", extraWidthOneSide + "px");
+
+                let oneSideChildGap = 0;
+
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("left", oneSideChildGap + "px");
+                    div.css("top", "-" + parentDiv.outerHeight(true) + "px");
+                    oneSideChildGap += div.outerWidth(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+
+        };
+
+        const createBoxGroupNodeDirectionRight = (startID) => {
+
+            let totalWidth = 0;
+            let totalHeight = 0;
+
+            let childrenNodeIDs = data.filter(x => x.ref == startID).map(function (item) {
+                return item.id;
+            });
+
+            childrenNodeIDs.forEach(function (item) {
+                let div = divMappingDictionary.get(item);
+                totalWidth = Math.max(totalWidth, div.outerWidth(true));
+                totalHeight += div.outerHeight(true);
+            });
+
+            let childrenNodeTotalHeightTemp = totalHeight;
+            let parentDiv = divMappingDictionary.get(startID);
+            totalHeight = Math.max(totalHeight, parentDiv.outerHeight(true));
+            totalWidth += parentDiv.outerWidth(true);
+
+            const nodeGroup = $("<div>")
+                .attr("id", "nodegroup" + startID)
+                .addClass("nodegroup")
+                .css({
+                    position: "absolute",
+                    width: totalWidth + "px",
+                    height: totalHeight + "px",
+                    margin: "0",
+                    padding: "0"
+                });
+
+            if (totalHeight == parentDiv.outerHeight(true)) {
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", "0px");
+
+                let extraHeightOneSide = (totalHeight - childrenNodeTotalHeightTemp) / 2;
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("top", extraHeightOneSide + "px");
+                    div.css("left", parentDiv.outerWidth(true) + "px");
+                    extraHeightOneSide += div.outerHeight(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+            else {
+
+                let extraHeightOneSide = (totalHeight - parentDiv.outerHeight(true)) / 2;
+
+                parentDiv.css("left", "0px");
+                parentDiv.css("top", extraHeightOneSide + "px");
+
+                let oneSideChildGap = 0;
+
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("top", oneSideChildGap + "px");
+                    div.css("left", parentDiv.outerWidth(true) + "px");
+                    oneSideChildGap += div.outerHeight(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+
+        };
+
+        const createBoxGroupNodeDirectionLeft = (startID) => {
+
+            let totalWidth = 0;
+            let totalHeight = 0;
+
+            let childrenNodeIDs = data.filter(x => x.ref == startID).map(function (item) {
+                return item.id;
+            });
+
+            childrenNodeIDs.forEach(function (item) {
+                let div = divMappingDictionary.get(item);
+                totalWidth = Math.max(totalWidth, div.outerWidth(true));
+                totalHeight += div.outerHeight(true);
+            });
+
+            let childrenNodeTotalHeightTemp = totalHeight;
+            let parentDiv = divMappingDictionary.get(startID);
+            totalHeight = Math.max(totalHeight, parentDiv.outerHeight(true));
+            totalWidth += parentDiv.outerWidth(true);
+
+            const nodeGroup = $("<div>")
+                .attr("id", "nodegroup" + startID)
+                .addClass("nodegroup")
+                .css({
+                    position: "absolute",
+                    width: totalWidth + "px",
+                    height: totalHeight + "px",
+                    margin: "0",
+                    padding: "0"
+                });
+
+            if (totalHeight == parentDiv.outerHeight(true)) {
+
+                parentDiv.css("top", "0px");
+                parentDiv.css("left", "0px");
+
+                let extraHeightOneSide = (totalHeight - childrenNodeTotalHeightTemp) / 2;
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("top", extraHeightOneSide + "px");
+                    div.css("left", "-" + parentDiv.outerWidth(true) + "px");
+                    extraHeightOneSide += div.outerHeight(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+            else {
+
+                let extraHeightOneSide = (totalHeight - parentDiv.outerHeight(true)) / 2;
+
+                parentDiv.css("left", "0px");
+                parentDiv.css("top", extraHeightOneSide + "px");
+
+                let oneSideChildGap = 0;
+
+                childrenNodeIDs.forEach(function (item) {
+                    let div = divMappingDictionary.get(item);
+                    div.css("top", oneSideChildGap + "px");
+                    div.css("left", "-" + parentDiv.outerWidth(true) + "px");
+                    oneSideChildGap += div.outerHeight(true);
+                    nodeGroup.append(div);
+                });
+
+                nodeGroup.append(parentDiv);
+
+                divMappingDictionary.set(startID, nodeGroup);
+
+            }
+
+        };
+
+        const recurseTree = (startID, start) => {
+
+            if (start == null) {
+
+                return;
+
+            }
+
+            for (let i = 0; i < start.length; i++) {
+
+                if (idMappingDictionary.has(start[i].id)) {
+
+                    recurseTree(start[i].id, idMappingDictionary.get(start[i].id));
+
+                }
+                else {
+
+                    recurseTree(start[i].id, null);
+
+                }
+
+                divMappingDictionary.set(start[i].id, createBox(start[i].id, start[i].name));
+
+            }
+
+            return;
+
+        };
+
+        const shiftingTree = (startID, start) => {
+            
+            if (start == null) {
+
+                return true;
+
+            }
+
+            for (let i = 0; i < start.length; i++) {
+
+                let isLeaf = false;
+
+                if (idMappingDictionary.has(start[i].id)) {
+
+                    isLeaf = shiftingTree(start[i].id, idMappingDictionary.get(start[i].id));
+
+                }
+                else {
+
+                    isLeaf = shiftingTree(start[i].id, null);
+
+                }
+
+            }
+
+            createBoxGroup(startID);
+
+            return false;
+
+        };
+
+        const displayGraph = () => {
+
+            //console.log(data);
+            //console.log(idMappingDictionary);
+            //console.log(divMappingDictionary);
+
+            divMappingDictionary.forEach(function (value, key) {
+
+                $("#graph-canvas").append(value);
+
+            });
+
+        };
+
+        const displayFinal = () => {
+
+            let startPoint = data.filter(x => x.ref == null)[0].id;
+
+            const finalNodeGroup = $("<div>")
+                .attr("id", "finalnodegroup" + startPoint)
+                .addClass("finalnodegroup")
+                .css({
+                    display: "flex",
+                    alignItems: "center",
+                    width: "100%",
+                    height: "100%",
+                    justifyContent: "center",
+                    margin: "0",
+                    padding: "0"
+                });
+
+            divMappingDictionary.set(startPoint, finalNodeGroup.append(divMappingDictionary.get(startPoint)));
+
+            $("#graph-canvas").append(divMappingDictionary.get(startPoint));
+
+        }
+
+        return {
+            initGraph
+        };
+    };
+
+    const graph = graphLibrary();
+    graph.initGraph([
+        {
+            id: 1005,
+            name: 'Level1_1',
+            ref: 1001,
+            isSibiling: false,
+            sequence: 2
+        },
+        {
+            id: 1001,
+            name: 'START',
+            ref: null,
+            isSibiling: false,
+            sequence: 1
+        },
+        {
+            id: 1006,
+            name: 'Level1_2',
+            ref: 1001,
+            isSibiling: false,
+            sequence: 6
+        },
+        {
+            id: 1007,
+            name: 'Level1_3',
+            ref: 1001,
+            isSibiling: false,
+            sequence: 7
+        },
+        {
+            id: 1002,
+            name: 'Level2_1',
+            ref: 1005,
+            isSibiling: false,
+            sequence: 3
+        },
+        {
+            id: 1003,
+            name: 'Level2_2',
+            ref: 1005,
+            isSibiling: false,
+            sequence: 4
+        },
+        {
+            id: 1004,
+            name: 'Level3_1',
+            ref: 1003,
+            isSibiling: false,
+            sequence: 5
+        },
+        {
+            id: 1008,
+            name: 'Level4_1',
+            ref: 1004,
+            isSibiling: false,
+            sequence: 8
+        },
+        {
+            id: 1009,
+            name: 'Level4_2',
+            ref: 1004,
+            isSibiling: false,
+            sequence: 9
+        },
+        {
+            id: 1010,
+            name: 'Level4_3',
+            ref: 1004,
+            isSibiling: false,
+            sequence: 10
+        },
+        {
+            id: 1011,
+            name: 'Level4_4',
+            ref: 1004,
+            isSibiling: false,
+            sequence: 11
+        }
+    ]);
+
+    //graph.initGraph([
+    //    {
+    //        id: 1001,
+    //        name: 'START',
+    //        ref: null,
+    //        isSibiling: false,
+    //        sequence: 1
+    //    },
+    //    {
+    //        id: 1002,
+    //        name: 'Hello',
+    //        ref: 1001,
+    //        isSibiling: false,
+    //        sequence: 2
+    //    },
+    //    {
+    //        id: 1003,
+    //        name: 'Hi',
+    //        ref: 1001,
+    //        isSibiling: false,
+    //        sequence: 3
+    //    },
+    //    {
+    //        id: 1004,
+    //        name: 'Ciao',
+    //        ref: 1001,
+    //        isSibiling: false,
+    //        sequence: 4
+    //    }
+    //]);
+    
+</script>
+
